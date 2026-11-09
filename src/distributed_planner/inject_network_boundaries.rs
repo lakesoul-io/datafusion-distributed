@@ -320,9 +320,14 @@ async fn _inject_network_boundaries(
     // Cap the reconciled task count by the configured max-per-stage budget.
     let task_count = task_count.limit(nb_ctx.max_tasks()?);
 
-    // Upon reaching a hash repartition, we need to introduce a network shuffle right above it.
+    // Upon reaching a hash or range repartition, we need to introduce a
+    // network shuffle right above it.  IVM uses a range over the deterministic
+    // LakeSoul bucket id to keep one bucket per output partition.
     if let Some(r_exec) = plan.downcast_ref::<RepartitionExec>()
-        && matches!(r_exec.partitioning(), Partitioning::Hash(_, _))
+        && matches!(
+            r_exec.partitioning(),
+            Partitioning::Hash(_, _) | Partitioning::Range(_)
+        )
     {
         let input_stage = LocalStage {
             query_id: nb_ctx.query_id,

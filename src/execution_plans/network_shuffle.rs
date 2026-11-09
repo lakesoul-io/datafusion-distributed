@@ -1,6 +1,6 @@
 use crate::common::require_one_child;
 use crate::distributed_planner::ProducerHead;
-use crate::execution_plans::common::scale_partitioning;
+use crate::execution_plans::common::{scale_partitioning, scale_range_partitioning};
 use crate::stage::{LocalStage, Stage};
 use crate::worker::WorkerConnectionPool;
 use crate::{DistributedTaskContext, MaybeEncoded, NetworkBoundary};
@@ -122,8 +122,13 @@ impl NetworkShuffleExec {
         let Some(r_exec) = input.downcast_ref::<RepartitionExec>() else {
             return plan_err!("The input of a NetworkShuffleExec can only be a RepartitionExec");
         };
-        if !matches!(r_exec.partitioning(), Partitioning::Hash(_, _)) {
-            return plan_err!("The input of a NetworkShuffleExec must be hash partitioned");
+        if !matches!(
+            r_exec.partitioning(),
+            Partitioning::Hash(_, _) | Partitioning::Range(_)
+        ) {
+            return plan_err!(
+                "The input of a NetworkShuffleExec must be hash or range partitioned"
+            );
         }
 
         let input_properties = Arc::clone(input.properties());
@@ -156,11 +161,18 @@ impl NetworkBoundary for NetworkShuffleExec {
     }
 
     fn producer_head(&self, consumer_task_count: usize) -> Result<ProducerHead> {
+        let partitioning = match &self.properties.partitioning {
+            // A range shuffle has a fixed, ordered set of buckets.  Scaling
+            // down merges adjacent buckets; scaling up would split a bucket,
+            // which is invalid for merge-on-read, so it is capped at the
+            // current range count.
+            Partitioning::Range(range) => {
+                Partitioning::Range(scale_range_partitioning(range, consumer_task_count)?)
+            }
+            other => scale_partitioning(other, |prev| prev * consumer_task_count)?,
+        };
         Ok(ProducerHead::RepartitionExec {
-            partitioning: MaybeEncoded::Decoded(scale_partitioning(
-                &self.properties.partitioning,
-                |prev| prev * consumer_task_count,
-            )?),
+            partitioning: MaybeEncoded::Decoded(partitioning),
         })
     }
 }
