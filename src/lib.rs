@@ -30,8 +30,8 @@ pub use events::{
     WorkerPlanRewriteEventResponse, WorkerPlanRewriteHandler,
 };
 pub use execution_plans::{
-    BroadcastExec, DistributedLeafExec, NetworkBroadcastExec, NetworkCoalesceExec,
-    NetworkShuffleExec,
+    BroadcastExec, ChildrenIsolatorUnionExec, DistributedLeafExec, NetworkBroadcastExec,
+    NetworkCoalesceExec, NetworkShuffleExec,
 };
 pub use metrics::{
     AvgLatencyMetric, BytesCounterMetric, BytesMetricExt, DISTRIBUTED_DATAFUSION_TASK_ID_LABEL,

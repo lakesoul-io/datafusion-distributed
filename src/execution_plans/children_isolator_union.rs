@@ -194,6 +194,20 @@ impl ChildrenIsolatorUnionExec {
         })
     }
 
+    /// The number of distributed tasks this union is split over.
+    pub fn task_count(&self) -> usize {
+        self.task_idx_map.len()
+    }
+
+    /// The children the task `task_index` executes, each with the task context the child runs
+    /// under inside that task, or `None` when `task_index` is out of range.
+    ///
+    /// Child indexes refer to [ExecutionPlan::children]. A child split over several tasks
+    /// appears in each of them with a different `task_index` in its context.
+    pub fn task_children(&self, task_index: usize) -> Option<&[(usize, DistributedTaskContext)]> {
+        self.task_idx_map.get(task_index).map(Vec::as_slice)
+    }
+
     pub(crate) fn child_task_counts(&self) -> Vec<usize> {
         // Preserve the task assignment in task_idx_map and allow child plans to be
         // replaced and properties to be recomputed from these new children.
@@ -854,6 +868,27 @@ mod tests {
             err.to_string().contains("max task count of 0"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn task_children_exposes_the_task_map() -> Result<(), Box<dyn std::error::Error>> {
+        use datafusion::arrow::datatypes::Schema;
+
+        let child =
+            || -> Arc<dyn ExecutionPlan> { Arc::new(EmptyExec::new(Arc::new(Schema::empty()))) };
+        let union = ChildrenIsolatorUnionExec::from_children_and_weights(
+            [child(), child(), child()],
+            [des(1.0), des(1.0), des(1.0)],
+            2,
+        )?;
+        assert_eq!(union.task_count(), 2);
+        assert_eq!(
+            union.task_children(0),
+            Some(&[(0, ctx(0, 1)), (2, ctx(0, 1))][..])
+        );
+        assert_eq!(union.task_children(1), Some(&[(1, ctx(0, 1))][..]));
+        assert_eq!(union.task_children(2), None);
+        Ok(())
     }
 
     fn ctx(task_index: usize, task_count: usize) -> DistributedTaskContext {
